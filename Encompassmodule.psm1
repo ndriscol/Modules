@@ -24,7 +24,6 @@ function Add-ToZipFiles
 .FUNCTIONALITY
    The functionality that best describes this cmdlet
 #>
-
     [CmdletBinding()]
     [OutputType([String])]
     Param
@@ -38,32 +37,47 @@ function Add-ToZipFiles
                    ParameterSetName='Parameter Set 1')]
         [ValidateNotNull()]
         [ValidateNotNullOrEmpty()]
-        $DesinationZipFile,
+        $DestinationZipFile,
         [Parameter()]
         [ValidateNotNull()]
         [ValidateNotNullOrEmpty()]
         $SourceDirectory
 
-    )
+        )
 
+if( ! ( Test-Path -Path $DestinationZipFile ) ){
    
-
     try{
+
             Add-Type -Assembly System.IO.Compression.FileSystem -ErrorAction Stop
-            $compressionLevel = [System.IO.Compression.CompressionLevel]::Optimal
+            $CompressionLevel = [System.IO.Compression.CompressionLevel]::Optimal 
             
         }Catch [System.exception]{
 
-                
+                $_ | fl * -Force
+
         }
 
     Try{
 
-            [System.IO.Compression.ZipFile]::CreateFromDirectory($SourceDirectory,$zipfilename, $DesinationZipFile, $false)
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($SourceDirectory,$DestinationZipFile, $CompressionLevel, $false)
 
         }Catch [System.exception]{
 
+                $_ | fl * -Force
 
         }
+
+    try{
+
+            
+
+        }catch [System.Exception]{
+
+
+        }
+
+
+    }
 
 }

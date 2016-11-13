@@ -4,13 +4,13 @@ function Add-ToZipFiles
 {
 <#
 .Synopsis
-   Short description
+   Compress files in a directory to a zip file.
 .DESCRIPTION
    Long description
 .EXAMPLE
-   Example of how to use this cmdlet
+   Add-ToZipFiles -$DestinationZipFile C:\ZippedFiles\TempZip.zip -$SourceDirectory C:\temp\ 
 .EXAMPLE
-   Another example of how to use this cmdlet
+   Add-ToZipFiles -DestinationZipFile C:\Scripts\ProdTestRemove.zip -SourceDirectory C:\Tempdir\ -RemoveSourceFiles True
 .INPUTS
    Inputs to this cmdlet (if any)
 .OUTPUTS
@@ -22,8 +22,11 @@ function Add-ToZipFiles
 .ROLE
    The role this cmdlet belongs to
 .FUNCTIONALITY
-   The functionality that best describes this cmdlet
+   Add-ToZipFiles -$DestinationZipFile C:\ZippedFiles\TempZip.zip -$SourceDirectory C:\temp\ 
+   
+   Add-ToZipFiles -DestinationZipFile C:\Scripts\ProdTestRemove.zip -SourceDirectory C:\Tempdir\ -RemoveSourceFiles True
 #>
+
     [CmdletBinding()]
     [OutputType([String])]
     Param
@@ -41,7 +44,10 @@ function Add-ToZipFiles
         [Parameter()]
         [ValidateNotNull()]
         [ValidateNotNullOrEmpty()]
-        $SourceDirectory
+        $SourceDirectory,
+        [Parameter()]
+        [Validateset('True','False')]
+        $RemoveSourceFiles
 
         )
 
@@ -68,15 +74,23 @@ if( ! ( Test-Path -Path $DestinationZipFile ) ){
 
         }
 
-    try{
+        if( $RemoveSourceFiles -match $true ){
 
-            
+            try{
 
-        }catch [System.Exception]{
+                    Remove-Item -Path $SourceDirectory -Force -Recurse -ErrorAction Stop 
 
+                }catch [System.Exception]{
 
+                     $_ | fl * -Force
+
+                }
         }
 
+    }else{
+
+
+        Write-Output "Error: $DestinationZipFile already exists choose another filename for your ZIP file."
 
     }
 

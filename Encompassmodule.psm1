@@ -184,7 +184,7 @@ Foreach( $Zip in $SourceZip ){
 }
 
 
-function Start-MaintenanceMode
+function Set-ScomMaintenanceMode
 {
 <#
 .Synopsis
@@ -199,41 +199,82 @@ function Start-MaintenanceMode
     [CmdletBinding()]
     [Alias()]
     [OutputType([int])]
-    Param
-    (
-        
-        [Parameter(Mandatory=$true,
-                   ValueFromPipelineByPropertyName=$true,
-                   Position=0)]
-        [String[]]$ComputerName,
-        [Parameter(Mandatory=$true,
-                   ValueFromPipelineByPropertyName=$true,
-                   Position=0)]
-        [int]$maintenanceModeMinutes,
-        [Parameter(Mandatory=$true,
-                   ValueFromPipelineByPropertyName=$true,
-                   Position=0)]
-        [String]$maintenanceModeComment
+ 
+    Param(       
+            [Parameter()]
+            $Inputlist,
+            [Parameter()]
+            [int]$maintenanceModeMinutes,
+            [Parameter()]
+            [String]$maintenanceModeComment,
+            [ValidateSet("Start", "Stop")]
+            $MaintenanceStopOrStart,
+            [Parameter()]
+            [String]$ManagementServer = 'SCOM.domain.local'
     )
+    
 
+if ( Test-Path -Path $Inputlist )  {     
 
-   ForEach ( $Computer in $ComputerName ){
+New-SCOMManagementGroupConnection –ComputerName $ManagementServer
 
+    Write-Output ("Stopping or starting Maintenance mode? {0}" -f $maintenanceStoporstart )
 
-        $ObjectInstance = Get-SCOMClassInstance -Name $Computer
-        $MaintenanceEntry = Get-SCOMMaintenanceMode -Instance $ObjectInstance
-        $NewEndTime = (Get-Date).addMinutes($maintenanceModeMinutes)
+    if( $maintenanceStoporstart -match 'Start' ){
 
-    Try{
+       ForEach ( $Computer in ( Import-csv -Path $inputlist -ErrorAction Stop ).Name ){
+       
+        Try{
+             
+               
+                $NewEndTime = (Get-Date).addMinutes( $maintenanceModeMinutes )
+                $ScomObj = Get-SCOMClassInstance -Name $Computer 
+                foreach( $obj in $ScomObj ){
 
-            Set-SCOMMaintenanceMode -MaintenanceModeEntry $MMEntry -EndTime $NewEndTime -Comment $maintenanceModeComment -ErrorAction
+                   if( ! ( $obj.InMaintenanceMode -eq $true ) ){
+
+                        Start-SCOMMaintenanceMode -Instance $obj -EndTime $NewEndTime -Comment $maintenanceModeComment -ErrorAction Stop
+
+                    }
+                }
+
+                Write-Output ("Placeing {0} into maintenance mode until {1}!" -f $Computer,$NewEndTime )
         
-        }Catch [System.Exception]{
+            }Catch [System.Exception]{
 
 
-            $_ | fl * -Force
+                $_ | fl * -Force
 
+            }
         }
+
+}elseif( $maintenanceStoporstart -eq 'Stop' ){
+
+New-SCOMManagementGroupConnection –ComputerName $ManagementServer -Verbose
+
+     ForEach ( $Computer in ( Import-csv -Path $inputlist -ErrorAction Stop ).Name ){
+       
+       Try{
+
+               $ObjectInstance = Get-SCOMClassInstance -Name $Computer
+               Get-SCOMMaintenanceMode -Instance $ObjectInstance | Set-SCOMMaintenanceMode -EndTime (Get-Date) -ErrorAction Stop -Verbose
+               Write-Output ("stopping maintenance on {0}!" -f $ObjectInstance[0])
+
+           }catch [System.exception]{
+
+               $_ | fl * -Force
+
+          }
     }
+}
+
+}else{
+
+
+
+    Write-Output ( "CSV Doest exist on path {0}!" -f  $Inputlist )
+
 
 }
+}
+

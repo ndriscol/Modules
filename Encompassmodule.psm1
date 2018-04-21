@@ -278,3 +278,91 @@ New-SCOMManagementGroupConnection –ComputerName $ManagementServer -Verbose
 }
 }
 
+[System.Net.WebRequest]::DefaultWebProxy.Credentials =  [System.Net.CredentialCache]::DefaultCredentials
+
+Function Get-VaultItem{
+[cmdletbinding()]
+Param(
+
+
+)
+
+    $null = [Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime] 
+    $windowsCredentialStore = [Windows.Security.Credentials.PasswordVault]::new()
+    $windowsCredentialStore.RetrieveAll() | Select-Object -Property UserName,Resource
+
+}
+
+Function Add-VaultItem{
+[cmdletbinding()]
+Param(
+	[Parameter(Mandatory=$true)]
+	[String]$ResourceName,
+
+	[Parameter(Mandatory=$false)]
+	[PSCredential]$PSCredential = (Get-Credential)
+)
+
+$Null = [Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]
+$windowsCredentialStore = [Windows.Security.Credentials.PasswordVault]::new()
+
+    try{
+	    $windowsCredentialStore.FindAllByUserName($ResourceName) | Out-Null
+	    throw $ResourceName + "Already exists! Choose another resource name to store the credential under!"
+    }catch [system.exception]{	
+	    $StoreCreds = [Windows.Security.Credentials.PasswordCredential]::new($ResourceName, $PSCredential.getnetworkcredential().Username,$PSCredential.getnetworkcredential().Password) 
+	    $windowsCredentialStore.Add($StoreCreds)
+    }
+
+}
+
+Function Remove-VaultItem{
+[cmdletbinding()]
+Param(
+	[Parameter(Mandatory=$true)]
+	[String]$ResourceName,
+
+	[Parameter(Mandatory=$true)]
+	[String]$UserName
+)
+
+$null =[Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]
+$windowsCredentialStore = [Windows.Security.Credentials.PasswordVault]::new()
+
+    try{
+        $Resource = $windowsCredentialStore.Retrieve($ResourceName,$UserName)
+	    $windowsCredentialStore.Remove($Resource)
+    }catch [system.exception]{	
+        throw $ResourceName + " Record doesnt exist!"
+    }
+
+}
+
+function Retrieve-VaultItem{
+Param(
+	[Parameter(Mandatory=$true)]
+	[String]$ResourceName,
+
+	[Parameter(Mandatory=$true)]
+	[String]$UserName
+)
+
+$null = [Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime] 
+$windowsCredentialStore = [Windows.Security.Credentials.PasswordVault]::new()
+
+
+    try{
+	Set-Clipboard -value ($windowsCredentialStore.Retrieve($ResourceName,$UserName)).Password
+	Write-Host ('Credential for {0} has been added to the clipboard' -f $UserName)
+    }catch [system.exception]{	
+        throw 'Record didnt exist to retrieve'
+    }
+
+}
+
+Export-ModuleMember -Function Add-VaultItem, Get-VaultItem, Remove-VaultItem, Retrieve-VaultItem
+
+
+
+ 
+

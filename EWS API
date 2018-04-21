@@ -1,0 +1,154 @@
+Write-EventLog -LogName Application -Source INGServiceNowEvents -EventId 1 -Message "Starting Incident Ticket script" -EntryType Information -Verbose
+ 
+$scriptLocationConfig = @{
+    ErrorAction = 'Stop'
+    Path = 'D:\ServiceNOW\MID_PRD_TICKET_LOGGER'
+    Verbose = $true
+}
+ 
+try{
+    Set-Location @scriptLocationConfig
+    Write-EventLog -LogName Application -EventId 1 -Source INGServiceNowEvents -EntryType Information -Message ('D:\ServiceNOW\MID_PRD_TICKET_LOGGER')
+}catch [system.io]{
+    Write-EventLog -LogName Application -Source INGServiceNowEvents -EntryType Error -Message $Error[0] -EventId 3 
+}
+ 
+add-type @"
+    using System.Net;
+    using System.Security.Cryptography.X509Certificates;
+
+    public class TrustAllCertsPolicy : ICertificatePolicy {
+        public bool CheckValidationResult(
+        ServicePoint srvPoint, X509Certificate certificate,
+        WebRequest request, int certificateProblem) {
+        return true;
+        }
+    }
+
+"@
+ 
+　
+ 
+[System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+$XML = [System.Xml.XmlDocument]::new()
+$XML.load([System.IO.FileInfo]::new('D:\ServiceNOW\MID_PRD_TICKET_LOGGER\Settings.config'))
+ 
+foreach($MailBox in $XML.ServiceNow.MailBoxes.Mailbox){
+ 
+$MailBox.SourceFolder
+$MailBox.DestinationFolder
+$MailBox.MailboxName
+$MailBox.SnowAssignmentGroup 
+ 
+try{
+
+    Write-EventLog -LogName Application -EventId 1 -Source INGServiceNowEvents -EntryType Information -Message ($Credential.UserName + "will connect to ServiceNow!")
+}catch [system.exception]{
+    Write-EventLog -LogName Application -Source INGServiceNowEvents -EntryType Error -Message $Error[0] -EventId 3
+}
+ 
+try{
+    Write-EventLog -LogName Application -EventId 1 -Source INGServiceNowEvents -EntryType Information -Message ($Credential.UserName + "will connect to ServiceNow!")
+}catch [system.exception]{
+    Write-EventLog -LogName Application -Source INGServiceNowEvents -EventId 3 -Message $Error[0] -EntryType Error -Verbose
+}
+
+　
+try{
+    Add-Type -Path D:\Scripts\TicketLogger\Microsoft.Exchange.WebServices.dll
+    $ExchangeService = New-Object Microsoft.Exchange.WebServices.Data.ExchangeService 
+    $ExchangeService::([Microsoft.Exchange.WebServices.Data.ExchangeVersion]::Exchange2013_SP1)
+    #$ExchangeService.UseDefaultCredentials = $true
+    $ExchangeService.Credentials = New-Object Microsoft.Exchange.WebServices.Data.WebCredentials($SnowCredential.GetNetworkCredential().UserName,$SnowCredential.GetNetworkCredential().password,"AU")
+    $ExchangeService.AutodiscoverUrl($MailBox.MailboxName)
+    $FolderView = New-Object Microsoft.Exchange.WebServices.Data.FolderView (1000)
+    #$FolderView = [Microsoft.Exchange.WebServices.Data.FolderView]::new(1000)
+    $FolderView.Traversal = [Microsoft.Exchange.WebServices.Data.FolderTraversal]::Deep;
+    $folderid = new-object Microsoft.Exchange.WebServices.Data.FolderId([Microsoft.Exchange.WebServices.Data.WellKnownFolderName]::MsgFolderRoot,[Microsoft.Exchange.WebServices.Data.Mailbox] $MailBox.MailboxName)
+    $TopLevelFolder = [Microsoft.Exchange.WebServices.Data.Folder]::Bind($ExchangeService,$folderid)
+    $Folders = $ExchangeService.FindFolders($TopLevelFolder.Id,$FolderView) 
+    $MoveFolder = $Folders | Where-Object {$_.DisplayName -eq $MailBox.DestinationFolder}
+    $SourceFolder = $Folders| Where-Object {$_.DisplayName -eq $MailBox.SourceFolder}
+    ##Set Email body to be plain text
+    $PropertySet = [Microsoft.Exchange.WebServices.Data.PropertySet]::new([Microsoft.Exchange.WebServices.Data.BasePropertySet]::FirstClassProperties)
+    $PropertySet.RequestedBodyType = [Microsoft.Exchange.WebServices.Data.BodyType]::Text
+    $PropertySet.Add([Microsoft.Exchange.WebServices.Data.ItemSchema]::MimeContent)
+    ##Search in the source folder for the 100 items, load the body of the email
+    $itemView = New-Object Microsoft.Exchange.WebServices.Data.ItemView (100)
+    #$itemView = [Microsoft.Exchange.WebServices.Data.ItemView]::new(100)
+    $Emails = $exchangeService.FindItems($SourceFolder.id ,$itemView)
+    $Emails | ForEach-Object {$_.load($PropertySet)}
+    Write-EventLog -LogName Application -Source INGServiceNowEvents -EventId 1 -Message ("Items to process:" + $Emails.TotalCount) -EntryType Information -Verbose
+    Write-EventLog -LogName Application -Source INGServiceNowEvents -EventId 1 -Message ($ExchangeService.Url.AbsoluteUri +$MailBox.MailboxName + '\' + $SourceFolder.DisplayName + '\' + $MoveFolder.DisplayName) -EntryType Information -Verbose
+}catch [system.exception]{
+    Write-EventLog -LogName Application -Source INGServiceNowEvents -EventId 3 -Message $Error[0] -EntryType Error -Verbose
+}
+ 
+##Set Email body to be plain text
+ 
+try{
+    $SysUsers = Invoke-RestMethod -Uri /now/table/sys_user -Credential $Credential -Method Get -Proxy ''
+}catch [system.exception]{
+    Write-EventLog -LogName Application -Source INGServiceNowEvents -EventId 3 -Message $Error[0] -EntryType Error -Verbose
+}
+ 
+foreach($Email in $Emails.Items){
+ 
+    $TicketResult = @() 
+    $callerid = $SysUsers.result | Where-Object {$_.email -match "$($email.From.address)"}
+ 
+    $headers = @{
+        "Accept" = “application/json”
+        "Content-Type" = "application/json"
+    }
+ 
+    $JsonBody = (@{ #Create body of the POST request
+    'short_description' = "$($Email.Subject)"
+    "description" = "$($Email.body.Text -replace '[\“|\”|\"|\/|\\|\%|\-|\#|\:|\*|\=|\.|\>|\<|\(|\)|\,]','' ) $("Please Refer to the attachment on the ticket for original content.") "
+    "caller_id" = "$($callerid.sys_id)"
+    "assignment_group" = "$($MailBox.SnowAssignmentGroup)"
+    "impact" = '3'
+    "urgency" = '3'
+    "category" = ''
+    "cmdb_ci" = ''
+    } | ConvertTo-Json) -replace '\\r\\n', '\n'
+ 
+    try{
+        $TicketResult = Invoke-RestMethod -Uri '/now/table/incident?' -Credential $Credential -Headers $headers -Body $JsonBody -Method POST -Verbose -Proxy ''
+        Write-EventLog -LogName Application -Source INGServiceNowEvents -EventId 1 -Message ($TicketResult.result.number + ": " + $TicketResult.result.short_description) -EntryType Information -Verbose
+    }catch [system.exception]{ 
+        Write-EventLog -LogName Application -Source INGServiceNowEvents -EventId 3 -Message ("Failed to process :" + $JsonBody) -EntryType error -Verbose
+    }
+
+
+    Start-Sleep -Seconds 20
+    $TmpFolder = $env:TEMP
+    Write-Verbose "Save original e-mail in temp '$TmpFolder'"
+    $TmpMail = Join-Path $TmpFolder (($Email.subject -replace '[\s|\\|\:]',' ') + '.eml')
+    $IoFile = [System.IO.FileStream]::new($TmpMail, [System.IO.FileMode]::Create) 
+    $IoFile.Write( $Email.MimeContent.Content, 0, $Email.MimeContent.Content.Length)
+    $IoFile.Close() 
+    $destination = ("s/INC/{0}/{1}/” -f $TicketResult.result.number.Substring(0,7),$TicketResult.result.number)
+ 
+    $req = [System.Net.HttpWebRequest]::Create($destination)
+    $req.Credentials = $SnowCredential
+    $req.Method = "MKCOL"
+    $res = $req.GetResponse()
+    $File = get-childitem $TmpMail
+    Start-Sleep -Seconds 10
+    $webclient = [System.Net.WebClient]::new()
+    $webclient.Credentials = $SnowCredential
+    $webclient.UploadFile($destination + "/" + $File.Name, "PUT", $File.FullName)
+    Remove-Item -Path $TmpMail 
+ 
+    if($TicketResult.result.number -match 'Inc'){
+        $Email.move([Microsoft.Exchange.WebServices.Data.FolderId]::new($MoveFolder.Id))
+    }
+
+} 
+
+
+
+}
+ 
+Write-EventLog -LogName Application -Source INGServiceNowEvents -EventId 1 -Message "Finished Incident Ticket script" -EntryType Information -Verbose
